@@ -558,7 +558,8 @@ export function normalizeSlugParam(value) {
     .trim()
     .toLowerCase();
   s = s.replace(/^[./?#]+/, "").replace(/[.\s,;:!?]+$/g, "");
-  return s;
+  // API e admin usam hífen; a vitrine indexa lojas com underscore.
+  return s.replace(/-/g, "_");
 }
 
 export function getSlugFromSearchParams(searchParams) {

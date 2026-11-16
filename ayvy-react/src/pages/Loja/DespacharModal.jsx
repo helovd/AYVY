@@ -60,8 +60,11 @@ export default function DespacharModal({ order, paymentLabel, onClose, onConfirm
         codigoRastreio,
       });
     } catch (err) {
-      setError(err.message || "Não foi possível despachar o pedido.");
+      const msg = err.message || "Não foi possível despachar o pedido.";
+      setError(msg);
       setSaving(false);
+      // Garante que o erro apareça mesmo se o modal fechar por engano
+      console.error("[AYVY] Falha ao despachar pedido:", err);
     }
   }
 

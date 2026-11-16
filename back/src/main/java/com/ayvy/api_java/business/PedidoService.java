@@ -212,13 +212,15 @@ public class PedidoService {
         }
         pedido.setEnviadoEm(LocalDateTime.now());
         pedido.setStatus(StatusPedido.enviado);
-        pedido = repository.save(pedido);
+        // Garante UPDATE no SQL Server antes de devolver a resposta ao front.
+        pedido = repository.saveAndFlush(pedido);
 
         registrarHistorico(pedido, "PEDIDO_DESPACHADO",
                 "Pacote deixado em " + localPostagem + detalheRastreio, request.getActorUsuarioId());
 
         notificarCliente(pedido, "Pedido despachado",
-                "Seu pedido foi despachado e já está a caminho" + detalheRastreio + ". Acompanhe o envio em Meus pedidos.");
+                "Seu pedido foi despachado e já está a caminho" + detalheRastreio
+                        + ". Acompanhe o envio em Meus pedidos.");
         ResumoPedido resumo = resumir(pedido);
         notificarAdmins("Pedido despachado " + resumo.codigos(),
                 resumo.lojas() + " despachou o pedido de " + resumo.cliente() + detalheRastreio

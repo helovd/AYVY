@@ -157,7 +157,7 @@ function paymentLabel(method) {
 export default function Loja() {
   const { slug: raw } = useParams();
   const slug = normalizeSlugParam(raw || "");
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const isOwner = isShopOwner(user, slug);
   const [searchParams, setSearchParams] = useSearchParams();
   const [shopsMap, setShopsMap] = useState(null);
@@ -317,7 +317,11 @@ export default function Loja() {
     return (
       <div className="loja-not-found">
         <p>Loja não encontrada.</p>
-        <Link to="/">Voltar ao início</Link>
+        {isAdmin ? (
+          <Link to="/admin/lojistas">Voltar ao painel · Lojistas</Link>
+        ) : (
+          <Link to="/">Voltar ao início</Link>
+        )}
       </div>
     );
   }
@@ -396,7 +400,35 @@ export default function Loja() {
   }
 
   async function handleDispatch(envio) {
-    await despacharPedidoLojista(dispatchOrder.apiId, user?.id, envio);
+    const pedidoId = dispatchOrder?.apiId;
+    if (pedidoId == null) {
+      throw new Error("Pedido inválido para despacho.");
+    }
+    const atualizado = await despacharPedidoLojista(pedidoId, user?.id, envio);
+    // Atualiza a lista na hora com o retorno do PUT — não depende só do reload.
+    setShopOrders((prev) =>
+      prev.map((o) => {
+        if (o.apiId !== pedidoId) return o;
+        return {
+          ...o,
+          status: String(atualizado?.status || "enviado").toLowerCase(),
+          etapaEnvio: atualizado?.etapaEnvio || "despachado",
+          envioIniciadoEm: Date.now(),
+          envio: {
+            ...o.envio,
+            localPostagem: atualizado?.localPostagem || envio.localPostagem || "",
+            transportadora: atualizado?.transportadora || envio.transportadora || "",
+            codigoRastreio: atualizado?.codigoRastreio || envio.codigoRastreio || "",
+            enviadoEm: atualizado?.enviadoEm
+              ? new Date(atualizado.enviadoEm).toLocaleString("pt-BR")
+              : o.envio?.enviadoEm || new Date().toLocaleString("pt-BR"),
+            recebidoEm: atualizado?.recebidoEm
+              ? new Date(atualizado.recebidoEm).toLocaleString("pt-BR")
+              : o.envio?.recebidoEm || "",
+          },
+        };
+      }),
+    );
     setDispatchOrder(null);
     await reloadOrders();
   }
@@ -417,6 +449,14 @@ export default function Loja() {
 
   return (
     <div className="page-loja-extra">
+      {isAdmin ? (
+        <div className="loja-admin-voltar">
+          <Link to="/admin/lojistas" className="loja-admin-voltar__btn">
+            <i className="fas fa-arrow-left" aria-hidden />
+            Voltar ao painel · Lojistas
+          </Link>
+        </div>
+      ) : null}
       <section className="loja-hero">
         <img src={shop.avatar} alt="" className="loja-hero-avatar" />
         <div className="loja-hero-content">

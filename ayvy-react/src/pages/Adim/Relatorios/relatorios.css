@@ -7,7 +7,22 @@
 }
 
 .admin-rel-cols {
-  align-items: start;
+  align-items: stretch;
+}
+
+.admin-rel-cols > .admin-rel-painel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  margin-bottom: 0;
+  min-height: 520px;
+}
+
+.admin-rel-painel__corpo {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.15rem;
 }
 
 .admin-rel-mes {
@@ -90,8 +105,13 @@
 }
 
 .admin-rel-tag--baixa {
-  background: #f3eef8;
-  color: #7c5a9a;
+  background: #fdecec;
+  color: #b42318;
+}
+
+.admin-rel-tag--nenhuma {
+  background: #f1f0f4;
+  color: #6b6578;
 }
 
 .admin-rel-bar-track {
@@ -117,7 +137,12 @@
 }
 
 .admin-rel-bar-fill--baixa {
-  background: #c4b5d4;
+  background: #e5484d;
+}
+
+.admin-rel-bar-fill--nenhuma {
+  background: #d4d0db;
+  min-width: 0;
 }
 
 .admin-rel-chart {
@@ -215,8 +240,87 @@
   color: #b45309;
 }
 
+.admin-rel-anual {
+  margin-bottom: 1.25rem;
+}
+
+.admin-rel-anual-resumo {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #777;
+}
+
+.admin-rel-chart--receita {
+  height: 200px;
+}
+
+.admin-rel-chart-value--money {
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.admin-rel-chart-bar--receita {
+  background: linear-gradient(180deg, #9b5fd4 0%, #7b3fbf 100%);
+}
+
+.admin-rel-anual-lista {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.admin-rel-anual-lista li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  background: #faf9fc;
+  font-size: 0.82rem;
+}
+
+.admin-rel-anual-lista span {
+  font-weight: 700;
+  color: #6b3d8a;
+}
+
+.admin-rel-anual-lista strong {
+  color: #1a1628;
+  font-weight: 600;
+}
+
+.admin-rel-anual-lista em {
+  font-style: normal;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+@media (max-width: 1100px) {
+  .admin-rel-anual-lista {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 900px) {
   .admin-rel-cols {
     grid-template-columns: 1fr;
+  }
+
+  .admin-rel-cols > .admin-rel-painel {
+    min-height: 0;
+    margin-bottom: 0;
+  }
+
+  .admin-rel-anual-lista {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .admin-rel-anual-lista {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

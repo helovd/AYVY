@@ -324,7 +324,9 @@ public class DemoDataBootstrap implements ApplicationRunner {
     private void garantirVariacoes(Produto produto, List<String> tamanhos, List<String> cores, int estoqueTotal) {
         if (!produtoVariacaoRepository.findByProdutoId(produto.getId()).isEmpty()) return;
         List<String> listaTamanhos = (tamanhos == null || tamanhos.isEmpty()) ? List.of("Único") : tamanhos;
-        List<String> listaCores = (cores == null || cores.isEmpty()) ? List.of("Conforme imagem") : cores;
+        List<String> listaCores = (cores == null || cores.isEmpty())
+                ? List.of(corPadrao(produto.getNome()))
+                : cores;
         int totalVariacoes = listaTamanhos.size() * listaCores.size();
         int porVariacao = Math.max(ESTOQUE_MINIMO_VARIACAO, estoqueTotal / totalVariacoes);
         int indice = 0;
@@ -374,6 +376,13 @@ public class DemoDataBootstrap implements ApplicationRunner {
             int estoqueBase = produto.getEstoque() == null || produto.getEstoque() < 0 ? 10 : produto.getEstoque();
             garantirVariacoes(produto, tamanhos, List.of(corPadrao(produto.getNome())), estoqueBase);
         }
+        // Troca rótulo genérico antigo pela cor inferida do nome (ex.: "leopard black" → Preto).
+        for (ProdutoVariacao variacao : produtoVariacaoRepository.findByProdutoId(produto.getId())) {
+            if (variacao.getCor() != null && "conforme imagem".equalsIgnoreCase(variacao.getCor().trim())) {
+                variacao.setCor(corPadrao(produto.getNome()));
+                produtoVariacaoRepository.save(variacao);
+            }
+        }
         if (vazio(produto.getDescricao())) {
             produto.setDescricao("Produto de demonstração da AYVY. Consulte as opções disponíveis e as informações da loja.");
             alterado = true;
@@ -388,34 +397,44 @@ public class DemoDataBootstrap implements ApplicationRunner {
     private String corPadrao(String nomeProduto) {
         String nome = nomeProduto == null ? "" : nomeProduto.toLowerCase(Locale.ROOT);
         if (nome.contains("off-white")) return "Off-white";
-        if (nome.contains("branc")) return "Branco";
-        if (nome.contains("pret")) return "Preto";
-        if (nome.contains("rox")) return "Roxo";
-        if (nome.contains("azul")) return "Azul";
-        if (nome.contains("vermelh")) return "Vermelho";
-        if (nome.contains("marrom")) return "Marrom";
-        if (nome.contains("amarel")) return "Amarelo";
-        if (nome.contains("cinza")) return "Cinza";
-        if (nome.contains("floral") || nome.contains("estamp")) return "Estampado";
-        if (nome.contains("bege")) return "Bege";
-        return "Conforme imagem";
+        if (nome.contains("branc") || nome.contains("white")) return "Branco";
+        if (nome.contains("pret") || nome.contains("black")) return "Preto";
+        if (nome.contains("rox") || nome.contains("purple")) return "Roxo";
+        if (nome.contains("azul") || nome.contains("blue")) return "Azul";
+        if (nome.contains("vermelh") || nome.contains("red")) return "Vermelho";
+        if (nome.contains("marrom") || nome.contains("brown")) return "Marrom";
+        if (nome.contains("amarel") || nome.contains("yellow")) return "Amarelo";
+        if (nome.contains("cinza") || nome.contains("grey") || nome.contains("gray")) return "Cinza";
+        if (nome.contains("vinho")) return "Vinho";
+        if (nome.contains("floral") || nome.contains("estamp") || nome.contains("leopard")
+                || nome.contains("onça") || nome.contains("onca")) return "Estampado";
+        if (nome.contains("bege") || nome.contains("beige")) return "Bege";
+        return "Única";
     }
 
     private List<String> tamanhosPadrao(String raiz, String nomeProduto) {
         String nome = nomeProduto == null ? "" : nomeProduto.toLowerCase(Locale.ROOT);
-        if ("calcados".equals(raiz)) {
+        boolean pareceCalcado = "calcados".equals(raiz)
+                || nome.contains("tênis") || nome.contains("tenis")
+                || nome.contains("bota") || nome.contains("sandália") || nome.contains("sandalia")
+                || nome.contains("sapato") || nome.contains("chinelo") || nome.contains("rasteira");
+        if (pareceCalcado) {
             if (nome.contains("bota")) return List.of("34", "35", "36", "37", "38", "39", "40");
             return List.of("34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44");
         }
         if ("bolsas".equals(raiz)) return List.of("Único");
-        if ("acessorios".equals(raiz)) {
+        if ("acessorios".equals(raiz) || "beleza".equals(raiz) || "maquiagem".equals(raiz)) {
             if (nome.contains("meia")) return List.of("34-39", "40-44");
             if (nome.contains("boné") || nome.contains("bone")) return List.of("Único");
             if (nome.contains("cinto")) return List.of("P", "M", "G");
-            return List.of();
+            // Maquiagem, perfume, etc.: sem numeração — só cor/único.
+            return List.of("Único");
         }
         if (nome.contains("calça") || nome.contains("calca")) return List.of("34", "36", "38", "40", "42", "44", "46");
-        return List.of("PP", "P", "M", "G", "GG", "XG");
+        if ("streetwear".equals(raiz) && !pareceCalcado) {
+            return List.of("PP", "P", "M", "G", "GG", "XG", "XXG", "XGG");
+        }
+        return List.of("PP", "P", "M", "G", "GG", "XG", "XXG", "XGG");
     }
 
     private void criarFavoritos(List<Cliente> clientes, List<Produto> produtos) {

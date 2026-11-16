@@ -1,9 +1,10 @@
 /**
- * Admin › Clientes: lista (GET /clientes), editar e excluir. Formulário em ./Form.jsx.
+ * Admin › Clientes: lista (GET /clientes), editar, bloquear e excluir. Formulário em ./Form.jsx.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { deleteCliente, listClientes } from "../../../services/adminApi";
+import ConfirmDialog from "../../../components/ConfirmDialog";
+import { deleteCliente, listClientes, updateUsuario } from "../../../services/adminApi";
 import { notifyAdminMetricsChanged } from "../../../utils/adminMetrics";
 import "../admin-crud.css";
 
@@ -15,6 +16,8 @@ export default function AdminClientesList() {
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [bloqueio, setBloqueio] = useState(null);
+  const [salvandoBloqueio, setSalvandoBloqueio] = useState(false);
   const filterRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -59,6 +62,38 @@ export default function AdminClientesList() {
     }
   }
 
+  function pedirBloqueio(row) {
+    const usuarioId = row.usuario?.id;
+    if (!usuarioId) {
+      setError("Cliente sem usuário vinculado.");
+      return;
+    }
+    const bloqueado = String(row.usuario?.status || "").toLowerCase() === "bloqueado";
+    setBloqueio({
+      usuarioId,
+      nome: row.usuario?.nome || `cliente #${row.id}`,
+      bloqueado,
+      proximo: bloqueado ? "ativo" : "bloqueado",
+    });
+  }
+
+  async function confirmarBloqueio() {
+    if (!bloqueio) return;
+    setSalvandoBloqueio(true);
+    setError("");
+    try {
+      // PUT /usuarios/:id — status do login (bloqueado não entra na conta)
+      await updateUsuario(bloqueio.usuarioId, { status: bloqueio.proximo });
+      notifyAdminMetricsChanged();
+      setBloqueio(null);
+      await load();
+    } catch (err) {
+      setError(err.message || (bloqueio.bloqueado ? "Erro ao desbloquear" : "Erro ao bloquear"));
+    } finally {
+      setSalvandoBloqueio(false);
+    }
+  }
+
   function handleFilterSelect(status) {
     setStatusFilter(status);
     setFilterOpen(false);
@@ -100,6 +135,7 @@ export default function AdminClientesList() {
                   <th>E-mail</th>
                   <th>CPF</th>
                   <th>Nascimento</th>
+                  <th>Status</th>
                   <th>Ações</th>
                   <th scope="col" className="admin-crud-buscar-cell">
                     <div className="admin-crud-buscar" ref={filterRef}>
@@ -147,11 +183,26 @@ export default function AdminClientesList() {
                     <td>{row.cpf}</td>
                     <td>{row.dataNascimento || "—"}</td>
                     <td>
+                      <span className={`admin-badge--status ${row.usuario?.status ?? ""}`}>
+                        {row.usuario?.status ?? "—"}
+                      </span>
+                    </td>
+                    <td>
                       <div className="admin-crud-actions">
                         {/* GET /clientes/:id no form — Salvar → PUT /clientes/:id */}
                         <Link to={`/admin/clientes/${row.id}/editar`} className="admin-crud-btn-sm">
                           Editar
                         </Link>
+                        <button
+                          type="button"
+                          className="admin-crud-btn-sm"
+                          onClick={() => pedirBloqueio(row)}
+                          disabled={!row.usuario?.id || salvandoBloqueio}
+                        >
+                          {String(row.usuario?.status || "").toLowerCase() === "bloqueado"
+                            ? "Desbloquear"
+                            : "Bloquear"}
+                        </button>
                         <button
                           type="button"
                           className="admin-crud-btn-sm admin-crud-btn-sm--danger"
@@ -170,6 +221,22 @@ export default function AdminClientesList() {
           </div>
         )}
       </section>
+
+      <ConfirmDialog
+        open={!!bloqueio}
+        title={bloqueio?.bloqueado ? `Desbloquear ${bloqueio.nome}?` : `Bloquear ${bloqueio?.nome}?`}
+        message={
+          bloqueio?.bloqueado
+            ? "A conta volta a funcionar e a pessoa poderá entrar no site e no app normalmente."
+            : "A conta deixa de funcionar: a pessoa não conseguirá entrar no site nem no app até ser desbloqueada."
+        }
+        confirmLabel={bloqueio?.bloqueado ? "Sim, desbloquear" : "Sim, bloquear"}
+        cancelLabel="Cancelar"
+        danger={!bloqueio?.bloqueado}
+        busy={salvandoBloqueio}
+        onCancel={() => !salvandoBloqueio && setBloqueio(null)}
+        onConfirm={confirmarBloqueio}
+      />
     </div>
   );
 }

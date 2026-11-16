@@ -1,13 +1,26 @@
 /**
- * Admin › Usuários: lista (GET /usuarios), editar, desativar e excluir. Formulário em ./Form.jsx.
+ * Admin › Usuários: lista (GET /usuarios), editar, bloquear e excluir. Formulário em ./Form.jsx.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { deleteUsuario, listUsuarios } from "../../../services/adminApi";
+import ConfirmDialog from "../../../components/ConfirmDialog";
+import { deleteUsuario, listUsuarios, updateUsuario } from "../../../services/adminApi";
 import { resolveImageUrl } from "../../../utils/imageUrl";
 import "../admin-crud.css";
 
 const STATUS_FILTERS = ["ativo", "inativo", "bloqueado"];
+
+/** Contas de demonstração do seed — não aparecem na lista do admin. */
+function isUsuarioDemo(row) {
+  const email = String(row?.email || "").toLowerCase();
+  const nome = String(row?.nome || "").toLowerCase();
+  return (
+    email === "lojista.teste@ayvy.local" ||
+    email === "cliente.checkout@ayvy.local" ||
+    nome === "loja teste ayvy" ||
+    nome === "cliente checkout"
+  );
+}
 
 export default function AdminUsuariosList() {
   const [items, setItems] = useState([]);
@@ -15,13 +28,14 @@ export default function AdminUsuariosList() {
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [bloqueio, setBloqueio] = useState(null);
+  const [salvandoBloqueio, setSalvandoBloqueio] = useState(false);
   const filterRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      // GET /usuarios — busca todos os usuários para preencher a tabela
       const data = await listUsuarios();
       setItems(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -31,7 +45,6 @@ export default function AdminUsuariosList() {
     }
   }, []);
 
-  // Ao abrir a página, carrega a lista uma vez
   useEffect(() => {
     load();
   }, [load]);
@@ -39,7 +52,6 @@ export default function AdminUsuariosList() {
   useEffect(() => {
     if (!filterOpen) return;
     function handleClickOutside(e) {
-      // Fecha o menu Buscar se o clique foi fora do botão/menu
       if (filterRef.current && !filterRef.current.contains(e.target)) {
         setFilterOpen(false);
       }
@@ -51,26 +63,47 @@ export default function AdminUsuariosList() {
   async function handleDelete(row) {
     if (!window.confirm(`Excluir usuário "${row.nome}"?`)) return;
     try {
-      // DELETE /usuarios/:id — remove o usuário no back
       await deleteUsuario(row.id);
-      // Recarrega a tabela após excluir
       await load();
     } catch (err) {
       setError(err.message || "Erro ao excluir");
     }
   }
 
+  function pedirBloqueio(row) {
+    const bloqueado = String(row.status || "").toLowerCase() === "bloqueado";
+    setBloqueio({
+      usuarioId: row.id,
+      nome: row.nome || row.email || `usuário #${row.id}`,
+      bloqueado,
+      proximo: bloqueado ? "ativo" : "bloqueado",
+    });
+  }
+
+  async function confirmarBloqueio() {
+    if (!bloqueio) return;
+    setSalvandoBloqueio(true);
+    setError("");
+    try {
+      await updateUsuario(bloqueio.usuarioId, { status: bloqueio.proximo });
+      setBloqueio(null);
+      await load();
+    } catch (err) {
+      setError(err.message || (bloqueio.bloqueado ? "Erro ao desbloquear" : "Erro ao bloquear"));
+    } finally {
+      setSalvandoBloqueio(false);
+    }
+  }
+
   function handleFilterSelect(status) {
-    // Guarda o status escolhido no Buscar ("" = Todos)
     setStatusFilter(status);
     setFilterOpen(false);
   }
 
   const filteredItems = useMemo(() => {
-    // Sem filtro: mostra todos os itens que vieram da API
-    if (!statusFilter) return items;
-    // Com filtro: mantém só quem tem o mesmo status no banco
-    return items.filter((row) => row.status === statusFilter);
+    const semDemo = items.filter((row) => !isUsuarioDemo(row));
+    if (!statusFilter) return semDemo;
+    return semDemo.filter((row) => row.status === statusFilter);
   }, [items, statusFilter]);
 
   return (
@@ -81,7 +114,6 @@ export default function AdminUsuariosList() {
           <p>Identidade da plataforma (login, papel e status).</p>
         </div>
         <div className="admin-page-actions">
-          {/* Abre Form.jsx — Salvar lá chama POST /usuarios */}
           <Link to="/admin/usuarios/novo" className="admin-btn admin-btn--primary">
             + Novo usuário
           </Link>
@@ -93,7 +125,6 @@ export default function AdminUsuariosList() {
       <section className="admin-card">
         <div className="admin-crud-toolbar">
           <span>{filteredItems.length} registro(s)</span>
-          {/* Botão Atualizar chama load() de novo (GET /usuarios) */}
           <button type="button" className="admin-crud-btn-sm" onClick={load} disabled={loading}>
             Atualizar
           </button>
@@ -117,7 +148,6 @@ export default function AdminUsuariosList() {
                       <button
                         type="button"
                         className="admin-crud-buscar__trigger"
-                        // Abre ou fecha o menu de filtro por status
                         onClick={() => setFilterOpen((open) => !open)}
                         aria-expanded={filterOpen}
                         aria-haspopup="listbox"
@@ -130,14 +160,12 @@ export default function AdminUsuariosList() {
                       {filterOpen ? (
                         <ul className="admin-crud-buscar__menu" role="listbox">
                           <li role="option" aria-selected={statusFilter === ""}>
-                            {/* Limpa o filtro e mostra todos */}
                             <button type="button" onClick={() => handleFilterSelect("")}>
                               Todos
                             </button>
                           </li>
                           {STATUS_FILTERS.map((status) => (
                             <li key={status} role="option" aria-selected={statusFilter === status}>
-                              {/* Aplica filtro local por status */}
                               <button type="button" onClick={() => handleFilterSelect(status)}>
                                 {status}
                               </button>
@@ -150,7 +178,6 @@ export default function AdminUsuariosList() {
                 </tr>
               </thead>
               <tbody>
-                {/* Só renderiza linhas que passaram no filtro do Buscar */}
                 {filteredItems.map((row) => (
                   <tr key={row.id}>
                     <td>{row.id}</td>
@@ -173,20 +200,29 @@ export default function AdminUsuariosList() {
                     </td>
                     <td>
                       <div className="admin-crud-actions">
-                        {/* Abre Form.jsx — GET /usuarios/:id e Salvar → PUT /usuarios/:id */}
                         <Link to={`/admin/usuarios/${row.id}/editar`} className="admin-crud-btn-sm">
                           Editar
                         </Link>
                         <button
                           type="button"
+                          className="admin-crud-btn-sm"
+                          onClick={() => pedirBloqueio(row)}
+                          disabled={salvandoBloqueio}
+                        >
+                          {String(row.status || "").toLowerCase() === "bloqueado"
+                            ? "Desbloquear"
+                            : "Bloquear"}
+                        </button>
+                        <button
+                          type="button"
                           className="admin-crud-btn-sm admin-crud-btn-sm--danger"
-                          // onClick → handleDelete → DELETE /usuarios/:id
                           onClick={() => handleDelete(row)}
                         >
                           Excluir
                         </button>
                       </div>
                     </td>
+                    <td aria-hidden="true" />
                   </tr>
                 ))}
               </tbody>
@@ -194,6 +230,22 @@ export default function AdminUsuariosList() {
           </div>
         )}
       </section>
+
+      <ConfirmDialog
+        open={!!bloqueio}
+        title={bloqueio?.bloqueado ? `Desbloquear ${bloqueio.nome}?` : `Bloquear ${bloqueio?.nome}?`}
+        message={
+          bloqueio?.bloqueado
+            ? "A conta volta a funcionar e a pessoa poderá entrar no site e no app normalmente."
+            : "A conta deixa de funcionar: a pessoa não conseguirá entrar no site nem no app até ser desbloqueada."
+        }
+        confirmLabel={bloqueio?.bloqueado ? "Sim, desbloquear" : "Sim, bloquear"}
+        cancelLabel="Cancelar"
+        danger={!bloqueio?.bloqueado}
+        busy={salvandoBloqueio}
+        onCancel={() => !salvandoBloqueio && setBloqueio(null)}
+        onConfirm={confirmarBloqueio}
+      />
     </div>
   );
 }

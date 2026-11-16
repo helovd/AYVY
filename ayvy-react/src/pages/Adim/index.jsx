@@ -161,13 +161,6 @@ export default function AdminHome() {
           </strong>
         </article>
       </section>
-      {apiOk ? (
-        <p className="admin-metrics-hint">
-          Números vêm da API. Perfil de cliente ou loja é criado em{" "}
-          <Link to="/admin/clientes">Clientes</Link> / <Link to="/admin/lojistas">Lojistas</Link>{" "}
-          (não basta só cadastrar usuário).
-        </p>
-      ) : null}
 
       <div className="admin-two-col">
         <section className="admin-card">

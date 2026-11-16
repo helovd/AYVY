@@ -24,7 +24,7 @@ import {
 } from "../../../services/lojistaApi";
 import "./style.css";
 
-const TAMANHOS_ROUPA = ["PP", "P", "M", "G", "GG", "XG", "Único"];
+const TAMANHOS_ROUPA = ["PP", "P", "M", "G", "GG", "XG", "XXG", "XGG", "EG", "EXG", "G1", "G2", "G3"];
 const numeracao = (de, ate) => Array.from({ length: ate - de + 1 }, (_, i) => String(de + i));
 const TAMANHOS_CALCADO_INFANTIL = numeracao(13, 32);
 const TAMANHOS_CALCADO_ADULTO = numeracao(33, 46);
@@ -32,6 +32,38 @@ const TAMANHOS_PADRAO = [...TAMANHOS_ROUPA, ...TAMANHOS_CALCADO_INFANTIL, ...TAM
 const PALAVRAS_CALCADO = ["calcado", "tenis", "bota", "sandalia", "sapat", "chinelo", "rasteira"];
 const PALAVRAS_INFANTIL = ["infantil", "bebe", "menina", "menino", "sapatinho"];
 const PRECO_MAX_DIGITOS = 9;
+
+/** Como o produto varia de tamanho — opcional; dá para publicar só com foto. */
+const MODOS_TAMANHO = [
+  {
+    id: "unico",
+    label: "Sem tamanho",
+    hint: "Pode publicar assim. Uma peça só (conforme a imagem). Cores também são opcionais.",
+  },
+  {
+    id: "roupa",
+    label: "Tamanhos de roupa",
+    hint: "PP ao G3 (XG, XXG, XGG, EG, EXG…).",
+  },
+  {
+    id: "calcado",
+    label: "Numeração de calçado",
+    hint: "Do 13 ao 46. Para tênis, botas e sandálias.",
+  },
+];
+
+function ehNumeroCalcado(tam) {
+  return /^\d{2}$/.test(String(tam || "").trim()) || /^\d{2}-\d{2}$/.test(String(tam || "").trim());
+}
+
+function inferirModoTamanho(sizes) {
+  const lista = (sizes || []).filter((s) => s && s !== TAMANHO_UNICO);
+  if (!lista.length) return "unico";
+  if (lista.every(ehNumeroCalcado)) return "calcado";
+  if (lista.every((s) => TAMANHOS_ROUPA.includes(s))) return "roupa";
+  if (lista.some(ehNumeroCalcado)) return "calcado";
+  return "roupa";
+}
 
 /** Máscara de dinheiro: os dígitos digitados viram centavos ("55000" → "550,00", "123456" → "1.234,56"). */
 function mascaraPreco(valor) {
@@ -76,6 +108,8 @@ export default function LojaProdutoNovo() {
   const [loadingEdit, setLoadingEdit] = useState(isEdit);
   const [loadError, setLoadError] = useState("");
   const [editStatus, setEditStatus] = useState("");
+  const [modoTamanho, setModoTamanho] = useState("unico");
+  const [modoManual, setModoManual] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +143,8 @@ export default function LojaProdutoNovo() {
         setImages(data.images);
         setOriginalImages(data.images);
         setEditStatus(String(data.produto?.status || "").toLowerCase());
+        setModoTamanho(inferirModoTamanho(data.form?.sizes));
+        setModoManual(true);
       } catch (err) {
         if (!cancelled) setLoadError(err.message || "Não foi possível carregar o produto.");
       } finally {
@@ -119,6 +155,21 @@ export default function LojaProdutoNovo() {
       cancelled = true;
     };
   }, [isEdit, productId, user?.lojistaId]);
+
+  // Sugere numeração de calçado quando a categoria/nome indica tênis/bota/etc.
+  useEffect(() => {
+    if (modoManual || isEdit) return;
+    const cat = categorias.find((c) => String(c.id) === String(form.categoryId));
+    const texto = [cat?.slug, cat?.categoriaPai?.slug, form.title]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+    if (PALAVRAS_CALCADO.some((p) => texto.includes(p))) {
+      setModoTamanho((m) => (m === "unico" ? "calcado" : m));
+    }
+  }, [form.categoryId, form.title, categorias, modoManual, isEdit]);
 
   if (!isShopOwner(user, slug)) {
     return <Navigate to={lojaPath} replace />;
@@ -207,6 +258,7 @@ export default function LojaProdutoNovo() {
   }
 
   function toggleSize(value) {
+    setModoManual(true);
     setForm((prev) => {
       const next = prev.sizes.includes(value)
         ? prev.sizes.filter((v) => v !== value)
@@ -220,9 +272,27 @@ export default function LojaProdutoNovo() {
     if (!name) return;
     const exists = form.sizes.some((s) => s.toLowerCase() === name.toLowerCase());
     if (!exists) {
+      setModoManual(true);
+      if (modoTamanho === "unico") setModoTamanho(ehNumeroCalcado(name) ? "calcado" : "roupa");
       setForm((prev) => ({ ...prev, sizes: [...prev.sizes, name] }));
     }
     setSizeInput("");
+  }
+
+  function escolherModoTamanho(modo) {
+    setModoManual(true);
+    setModoTamanho(modo);
+    if (modo === "unico") {
+      setForm((prev) => ({ ...prev, sizes: [] }));
+      return;
+    }
+    // Ao trocar o tipo, remove tamanhos do outro sistema (P/M/G ↔ numeração).
+    setForm((prev) => ({
+      ...prev,
+      sizes: prev.sizes.filter((s) =>
+        modo === "calcado" ? ehNumeroCalcado(s) : !ehNumeroCalcado(s) && s !== TAMANHO_UNICO,
+      ),
+    }));
   }
 
   function addColor() {
@@ -312,26 +382,54 @@ export default function LojaProdutoNovo() {
 
   const combinacoes = combinacoesDoForm(form);
   const estoqueTotal = combinacoes.reduce((soma, c) => soma + c.estoque, 0);
-  const tamanhosExtras = form.sizes.filter((s) => !TAMANHOS_PADRAO.includes(s));
   const categoriaAtual = categorias.find((c) => String(c.id) === String(form.categoryId));
-  const textoCategoria = [categoriaAtual?.slug, categoriaAtual?.categoriaPai?.slug].join(" ");
+  const textoCategoria = [
+    categoriaAtual?.slug,
+    categoriaAtual?.categoriaPai?.slug,
+    form.title,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
   const ehCalcado = PALAVRAS_CALCADO.some((p) => textoCategoria.includes(p));
   const ehInfantil = PALAVRAS_INFANTIL.some((p) => textoCategoria.includes(p));
+  const modoEfetivo = modoTamanho;
+
   const precoNumero = Number(String(form.price || "").replace(/\./g, "").replace(",", "."));
   const descontoNumero = Math.min(90, Math.max(0, Math.round(Number(form.discountPercent) || 0)));
   const precoComDesconto =
     Number.isFinite(precoNumero) && precoNumero > 0 && descontoNumero > 0
       ? (precoNumero * (100 - descontoNumero)) / 100
       : null;
-  const grupoRoupa = { titulo: "Tamanhos de roupa", opcoes: TAMANHOS_ROUPA };
-  const grupoAdulto = { titulo: "Calçado adulto (33 ao 46)", opcoes: TAMANHOS_CALCADO_ADULTO };
-  const grupoInfantil = { titulo: "Calçado infantil (13 ao 32)", opcoes: TAMANHOS_CALCADO_INFANTIL };
-  const gruposTamanho = !ehCalcado
-    ? [grupoRoupa, grupoAdulto, grupoInfantil]
-    : ehInfantil
-      ? [grupoInfantil, grupoAdulto, grupoRoupa]
-      : [grupoAdulto, grupoInfantil, grupoRoupa];
-  if (tamanhosExtras.length) gruposTamanho.push({ titulo: "Outros tamanhos", opcoes: tamanhosExtras });
+
+  const tamanhosExtras = form.sizes.filter((s) => {
+    if (TAMANHOS_PADRAO.includes(s) || s === TAMANHO_UNICO) return false;
+    if (modoEfetivo === "calcado") return ehNumeroCalcado(s);
+    if (modoEfetivo === "roupa") return !ehNumeroCalcado(s);
+    return true;
+  });
+  const gruposTamanho =
+    modoEfetivo === "calcado"
+      ? [
+          ...(ehInfantil
+            ? [
+                { titulo: "Calçado infantil (13 ao 32)", opcoes: TAMANHOS_CALCADO_INFANTIL },
+                { titulo: "Calçado adulto (33 ao 46)", opcoes: TAMANHOS_CALCADO_ADULTO },
+              ]
+            : [
+                { titulo: "Calçado adulto (33 ao 46)", opcoes: TAMANHOS_CALCADO_ADULTO },
+                { titulo: "Calçado infantil (13 ao 32)", opcoes: TAMANHOS_CALCADO_INFANTIL },
+              ]),
+          ...(tamanhosExtras.length ? [{ titulo: "Outros números", opcoes: tamanhosExtras }] : []),
+        ]
+      : modoEfetivo === "roupa"
+        ? [
+            { titulo: "Tamanhos de roupa", opcoes: TAMANHOS_ROUPA },
+            ...(tamanhosExtras.length ? [{ titulo: "Outros tamanhos", opcoes: tamanhosExtras }] : []),
+          ]
+        : [];
 
   if (isEdit && (loadingEdit || loadError)) {
     return (
@@ -532,20 +630,22 @@ export default function LojaProdutoNovo() {
 
             <p className="produto-novo-estoque-total">
               <i className="fas fa-boxes-stacked" aria-hidden /> Estoque total:{" "}
-              <strong>{estoqueTotal} peça(s)</strong> — soma da tabela "Estoque por tamanho e cor" abaixo.
+              <strong>{estoqueTotal} peça(s)</strong> — soma da tabela de estoque abaixo.
             </p>
           </section>
 
           <section className="produto-novo-card">
             <h2>
-              <i className="fas fa-palette" aria-hidden /> Variações
+              <i className="fas fa-palette" aria-hidden /> Variações{" "}
+              <span className="produto-novo-opcional">(opcional)</span>
             </h2>
             <p className="produto-novo-hint">
-              Clique no X para tirar uma cor e no tamanho para ligar ou desligar.
+              Pode publicar só com foto, nome, categoria e preço — sem cor e sem tamanho. Se quiser,
+              adicione cores e/ou tamanhos abaixo.
             </p>
 
             <div className="produto-novo-chips-group">
-              <span className="produto-novo-chips-label">Cores</span>
+              <span className="produto-novo-chips-label">Cores (opcional)</span>
               {form.colors.length > 0 ? (
                 <div className="produto-novo-chips produto-novo-chips--tags">
                   {form.colors.map((cor) => (
@@ -574,92 +674,143 @@ export default function LojaProdutoNovo() {
                   onKeyDown={onEnter(addColor)}
                   maxLength={40}
                 />
-                <button
-                  type="button"
-                  className="produto-novo-chip"
-                  onClick={addColor}
-                >
+                <button type="button" className="produto-novo-chip" onClick={addColor}>
                   Adicionar
                 </button>
               </div>
             </div>
 
             <div className="produto-novo-chips-group">
-              {gruposTamanho.map((grupo) => (
-                <div key={grupo.titulo} className="produto-novo-tamanhos">
-                  <span className="produto-novo-chips-label">{grupo.titulo}</span>
-                  <div className="produto-novo-chips">
-                    {grupo.opcoes.map((tam) => (
-                      <button
-                        key={tam}
-                        type="button"
-                        className={`produto-novo-chip${form.sizes.includes(tam) ? " is-on" : ""}`}
-                        onClick={() => toggleSize(tam)}
-                      >
-                        {tam}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              <div className="produto-novo-color-add" style={{ marginTop: "0.65rem" }}>
-                <input
-                  type="text"
-                  className="produto-novo-color-input"
-                  placeholder="Outro tamanho (ex.: 34/35, 2 anos)"
-                  value={sizeInput}
-                  onChange={(e) => setSizeInput(e.target.value)}
-                  onKeyDown={onEnter(addSize)}
-                  maxLength={20}
-                />
-                <button
-                  type="button"
-                  className="produto-novo-chip"
-                  onClick={addSize}
-                >
-                  Adicionar
-                </button>
+              <span className="produto-novo-chips-label">Tamanhos (opcional)</span>
+              <div className="produto-novo-modos" role="radiogroup" aria-label="Tipo de tamanho">
+                {MODOS_TAMANHO.map((modo) => (
+                  <label
+                    key={modo.id}
+                    className={`produto-novo-modo${modoEfetivo === modo.id ? " is-on" : ""}`}
+                  >
+                    <input
+                      type="radio"
+                      name="modo-tamanho"
+                      value={modo.id}
+                      checked={modoEfetivo === modo.id}
+                      onChange={() => escolherModoTamanho(modo.id)}
+                    />
+                    <span>
+                      <strong>{modo.label}</strong>
+                      <small>{modo.hint}</small>
+                    </span>
+                  </label>
+                ))}
               </div>
             </div>
+
+            {modoEfetivo !== "unico" ? (
+              <div className="produto-novo-chips-group">
+                {gruposTamanho.map((grupo) => (
+                  <div key={grupo.titulo} className="produto-novo-tamanhos">
+                    <span className="produto-novo-chips-label">{grupo.titulo}</span>
+                    <div className="produto-novo-chips">
+                      {grupo.opcoes.map((tam) => (
+                        <button
+                          key={tam}
+                          type="button"
+                          className={`produto-novo-chip${form.sizes.includes(tam) ? " is-on" : ""}`}
+                          onClick={() => toggleSize(tam)}
+                        >
+                          {tam}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div className="produto-novo-color-add" style={{ marginTop: "0.65rem" }}>
+                  <input
+                    type="text"
+                    className="produto-novo-color-input"
+                    placeholder={
+                      modoEfetivo === "calcado"
+                        ? "Outro número (ex.: 47)"
+                        : "Outro tamanho (ex.: 38, 40, 2 anos)"
+                    }
+                    value={sizeInput}
+                    onChange={(e) => setSizeInput(e.target.value)}
+                    onKeyDown={onEnter(addSize)}
+                    maxLength={20}
+                  />
+                  <button type="button" className="produto-novo-chip" onClick={addSize}>
+                    Adicionar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="produto-novo-hint produto-novo-hint--ok">
+                <i className="fas fa-check-circle" aria-hidden /> Sem tamanho selecionado — pode
+                publicar assim. O sistema guarda o estoque automaticamente
+                {form.colors.length ? " por cor" : ""}.
+              </p>
+            )}
           </section>
 
           <section className="produto-novo-card">
             <h2>
-              <i className="fas fa-boxes-stacked" aria-hidden /> Estoque por tamanho e cor
+              <i className="fas fa-boxes-stacked" aria-hidden /> Estoque
+              {modoEfetivo === "unico"
+                ? form.colors.length
+                  ? " por cor"
+                  : ""
+                : " por tamanho e cor"}
             </h2>
             <p className="produto-novo-hint">
-              Cada combinação é uma variação com o seu próprio estoque (ex.: Preto 38 e Preto 39 são
-              diferentes). Sem cor ou sem tamanho escolhidos, usamos "{COR_UNICA}" / "{TAMANHO_UNICO}".
+              {modoEfetivo === "unico"
+                ? form.colors.length
+                  ? "Informe quantas peças tem de cada cor."
+                  : "Informe quantas peças tem deste produto (pode deixar 0 e repor depois no Meu estoque)."
+                : modoEfetivo === "calcado"
+                  ? "Cada número (ex.: Preto 38 e Preto 39) tem o seu estoque. Marque os números que você vende."
+                  : "Cada combinação cor × tamanho tem o seu estoque."}
             </p>
-            <div className="produto-novo-var-preencher">
-              <span>Preencher todas com</span>
-              <input
-                type="number"
-                min={0}
-                placeholder="Ex.: 10"
-                value={preencherTodas}
-                onChange={(e) => setPreencherTodas(e.target.value)}
-              />
-              <button type="button" className="produto-novo-chip" onClick={aplicarEmTodas}>
-                Aplicar
-              </button>
-            </div>
+            {combinacoes.length > 1 ? (
+              <div className="produto-novo-var-preencher">
+                <span>Preencher todas com</span>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="Ex.: 10"
+                  value={preencherTodas}
+                  onChange={(e) => setPreencherTodas(e.target.value)}
+                />
+                <button type="button" className="produto-novo-chip" onClick={aplicarEmTodas}>
+                  Aplicar
+                </button>
+              </div>
+            ) : null}
             <div className="produto-novo-var-tabela-wrap">
               <table className="produto-novo-var-tabela">
                 <thead>
                   <tr>
-                    <th>Cor</th>
-                    <th>Tamanho</th>
-                    <th>Quantidade</th>
+                    {modoEfetivo === "unico" && !form.colors.length ? (
+                      <th>Quantidade em estoque</th>
+                    ) : (
+                      <>
+                        <th>Cor</th>
+                        {modoEfetivo !== "unico" ? <th>Tamanho</th> : null}
+                        <th>Quantidade</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {combinacoes.map((c) => {
                     const chave = chaveVariacao(c.cor, c.tamanho);
+                    const soQuantidade = modoEfetivo === "unico" && !form.colors.length;
                     return (
                       <tr key={chave}>
-                        <td>{c.cor}</td>
-                        <td>{c.tamanho}</td>
+                        {soQuantidade ? null : (
+                          <td>{c.cor === COR_UNICA ? "—" : c.cor}</td>
+                        )}
+                        {modoEfetivo !== "unico" ? (
+                          <td>{c.tamanho === TAMANHO_UNICO ? "—" : c.tamanho}</td>
+                        ) : null}
                         <td>
                           <input
                             type="number"

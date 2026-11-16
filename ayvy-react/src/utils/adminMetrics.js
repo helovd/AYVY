@@ -20,6 +20,12 @@ export function notifyAdminMetricsChanged() {
   }
 }
 
+function isLojaTeste(l) {
+  const slug = String(l?.slug || "").toLowerCase().replace(/-/g, "_");
+  const nome = String(l?.nomeLoja || "").toLowerCase();
+  return slug === "loja_teste_ayvy" || nome === "loja teste ayvy";
+}
+
 export async function fetchAdminMetrics() {
   const [clientes, lojistas, produtos] = await Promise.all([
     listClientes(),
@@ -27,14 +33,21 @@ export async function fetchAdminMetrics() {
     listProdutos(),
   ]);
 
-  const produtosArr = Array.isArray(produtos) ? produtos : [];
+  const lojasValidas = (Array.isArray(lojistas) ? lojistas : []).filter((l) => !isLojaTeste(l));
+  const idsTeste = new Set(
+    (Array.isArray(lojistas) ? lojistas : []).filter(isLojaTeste).map((l) => l.id),
+  );
+  const produtosArr = (Array.isArray(produtos) ? produtos : []).filter((p) => {
+    const lid = p.lojista?.id ?? p.lojistaId;
+    return lid == null || !idsTeste.has(lid);
+  });
   const countByLojista = {};
   for (const p of produtosArr) {
     const lid = p.lojista?.id ?? p.lojistaId;
     if (lid != null) countByLojista[lid] = (countByLojista[lid] || 0) + 1;
   }
 
-  const lojaList = (Array.isArray(lojistas) ? lojistas : []).map((l) => ({
+  const lojaList = lojasValidas.map((l) => ({
     id: l.id,
     slug: l.slug,
     name: l.nomeLoja,

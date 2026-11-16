@@ -1,6 +1,6 @@
 /**
- * Meu estoque (/meu-estoque, só lojista): planilha de estoque POR VARIAÇÃO (cor + tamanho) de cada
- * produto, por categoria; alertas de reposição; gráfico de vendas mês a mês e o card AYVY Premium.
+ * Meu estoque (/meu-estoque, só lojista): planilha por PRODUTO (uma foto) com variações (cor + tamanho)
+ * em colunas — estoque, vendidos e situação; alertas de reposição; gráfico de vendas; card Premium.
  * Ligado às vendas: o checkout tira da variação comprada e o cancelamento/reembolso devolve (back).
  * Dados: services/estoqueApi.js (variações em /produtos/{id}/variacoes + relatório /estoque/relatorio).
  */
@@ -38,8 +38,40 @@ function nomeCategoria(produto) {
 }
 
 function rotuloLinha(linha) {
-  const detalhes = [linha.cor, linha.tamanho].filter((v) => v && v !== COR_UNICA && v !== TAMANHO_UNICO);
+  const detalhes = [linha.cor, linha.tamanho].filter(
+    (v) => v && v !== COR_UNICA && v !== TAMANHO_UNICO && String(v).toLowerCase() !== "conforme imagem",
+  );
   return `${linha.produto?.nome || "Produto"}${detalhes.length ? ` (${detalhes.join(", ")})` : ""}`;
+}
+
+function corEhGenerica(cor) {
+  const c = String(cor || "").trim().toLowerCase();
+  return !c || c === "única" || c === "unica" || c === "conforme imagem";
+}
+
+/** Rótulo curto da variação na matriz (ex.: "P", "Preto · M"). */
+function rotuloVariacao(linha, irmas) {
+  const coresUteis = irmas.map((l) => l.cor).filter((c) => !corEhGenerica(c));
+  const cores = new Set(coresUteis.map((c) => String(c).toLowerCase()));
+  const tamanhos = new Set(irmas.map((l) => l.tamanho));
+  const mostraCor = !corEhGenerica(linha.cor) && (cores.size > 1 || coresUteis.length > 0);
+  const mostraTam = tamanhos.size > 1 || (linha.tamanho && linha.tamanho !== TAMANHO_UNICO);
+  const partes = [];
+  if (mostraCor) partes.push(linha.cor);
+  if (mostraTam) partes.push(linha.tamanho);
+  return partes.length ? partes.join(" · ") : "Única";
+}
+
+function situacaoLinha(quantidade) {
+  if (quantidade === 0) return "zerado";
+  if (quantidade <= ESTOQUE_BAIXO) return "baixo";
+  return "ok";
+}
+
+function rotuloSituacao(situacao) {
+  if (situacao === "zerado") return "Repor";
+  if (situacao === "baixo") return "Baixo";
+  return "OK";
 }
 
 /** Lista contínua de meses (aaaa-mm) do primeiro registro até o mês atual. */
@@ -119,14 +151,39 @@ export default function MeuEstoque() {
   const linhasAtivas = linhas.filter((l) => l.ativo);
   const linhasDesativadas = linhas.filter((l) => !l.ativo);
 
+  // Categoria → produtos (uma foto cada) → variações em colunas.
   const grupos = useMemo(() => {
-    const mapa = new Map();
+    const porCategoria = new Map();
     for (const l of linhasAtivas) {
-      const nome = nomeCategoria(l.produto);
-      if (!mapa.has(nome)) mapa.set(nome, []);
-      mapa.get(nome).push(l);
+      const cat = nomeCategoria(l.produto);
+      if (!porCategoria.has(cat)) porCategoria.set(cat, new Map());
+      const porProduto = porCategoria.get(cat);
+      const pid = l.produto?.id ?? `x-${l.id}`;
+      if (!porProduto.has(pid)) {
+        porProduto.set(pid, { produto: l.produto, variacoes: [] });
+      }
+      porProduto.get(pid).variacoes.push(l);
     }
-    return [...mapa.entries()].sort((a, b) => a[0].localeCompare(b[0], "pt-BR"));
+    return [...porCategoria.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "pt-BR"))
+      .map(([categoria, porProduto]) => {
+        const produtosGrupo = [...porProduto.values()].map((bloco) => ({
+          ...bloco,
+          variacoes: bloco.variacoes.slice().sort((a, b) => {
+            const cor = String(a.cor).localeCompare(String(b.cor), "pt-BR");
+            if (cor !== 0) return cor;
+            return String(a.tamanho).localeCompare(String(b.tamanho), "pt-BR", { numeric: true });
+          }),
+        }));
+        produtosGrupo.sort((a, b) =>
+          String(a.produto?.nome || "").localeCompare(String(b.produto?.nome || ""), "pt-BR"),
+        );
+        const pecas = produtosGrupo.reduce(
+          (s, p) => s + p.variacoes.reduce((ss, l) => ss + l.quantidade, 0),
+          0,
+        );
+        return { categoria, pecas, produtos: produtosGrupo };
+      });
   }, [linhasAtivas]);
 
   const zerados = linhasAtivas.filter((l) => l.quantidade === 0);
@@ -532,102 +589,127 @@ export default function MeuEstoque() {
             <h2>
               <i className="fas fa-table" aria-hidden /> Planilha de estoque
             </h2>
-            {grupos.map(([categoria, lista]) => (
+            <p className="est-dica est-dica--topo">
+              Um produto, uma foto. As variações (cor/tamanho) ficam lado a lado com estoque, vendas e situação.
+            </p>
+            {grupos.map(({ categoria, pecas, produtos: produtosGrupo }) => (
               <div key={categoria} className="est-grupo">
                 <h3>
                   {categoria}
-                  <small>{lista.reduce((s, l) => s + l.quantidade, 0)} peça(s)</small>
+                  <small>{pecas} peça(s)</small>
                 </h3>
-                <div className="est-tabela-wrap">
-                  <table className="est-tabela">
-                    <thead>
-                      <tr>
-                        <th>Produto</th>
-                        <th>Cor</th>
-                        <th>Tamanho</th>
-                        <th>Em estoque</th>
-                        <th>Vendidos</th>
-                        <th>Situação</th>
-                        <th aria-label="Ações" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lista.map((l) => {
-                        const valorCampo = quantidades[l.id] ?? String(l.quantidade);
-                        const situacao =
-                          l.quantidade === 0 ? "zerado" : l.quantidade <= ESTOQUE_BAIXO ? "baixo" : "ok";
-                        return (
-                          <tr key={l.id} className={`is-${situacao}`}>
-                            <td>
-                              <span className="est-produto">
-                                <img
-                                  src={resolveImageUrl(l.produto?.imagemPrincipalUrl) || IMAGEM_PADRAO}
-                                  alt=""
-                                  onError={(e) => {
-                                    e.currentTarget.src = IMAGEM_PADRAO;
-                                  }}
-                                />
-                                <span>
-                                  {l.produto?.nome}
-                                  <small>{formatBRL(Number(l.produto?.precoFinal ?? l.produto?.preco) || 0)}</small>
-                                </span>
-                              </span>
-                            </td>
-                            <td>{l.cor}</td>
-                            <td>{l.tamanho}</td>
-                            <td>
-                              <span className="est-qtd">
-                                <button
-                                  type="button"
-                                  aria-label="Tirar uma"
-                                  disabled={salvando || l.quantidade === 0}
-                                  onClick={() => salvarQuantidade(l, l.quantidade - 1)}
-                                >
-                                  −
-                                </button>
-                                <input
-                                  id={`est-qtd-${l.id}`}
-                                  type="number"
-                                  min={0}
-                                  value={valorCampo}
-                                  onChange={(e) => setQuantidades((q) => ({ ...q, [l.id]: e.target.value }))}
-                                  onBlur={(e) => salvarQuantidade(l, e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") e.currentTarget.blur();
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  aria-label="Somar uma"
-                                  disabled={salvando}
-                                  onClick={() => salvarQuantidade(l, l.quantidade + 1)}
-                                >
-                                  +
-                                </button>
-                              </span>
-                            </td>
-                            <td>{vendidosPorLinha[l.id] || 0}</td>
-                            <td>
-                              <span className={`est-chip est-chip--${situacao}`}>
-                                {situacao === "zerado" ? "Repor" : situacao === "baixo" ? "Baixo" : "OK"}
-                              </span>
-                            </td>
-                            <td>
-                              <button
-                                type="button"
-                                className="est-remover"
-                                onClick={() => setRemover(l)}
-                                aria-label={`Desativar ${rotuloLinha(l)}`}
-                                title="Desativar variação (some da loja)"
-                              >
-                                <i className="fas fa-eye-slash" aria-hidden />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                <div className="est-produtos">
+                  {produtosGrupo.map(({ produto, variacoes }) => (
+                    <article key={produto?.id || variacoes[0]?.id} className="est-matriz">
+                      <header className="est-matriz__produto">
+                        <img
+                          src={resolveImageUrl(produto?.imagemPrincipalUrl) || IMAGEM_PADRAO}
+                          alt=""
+                          onError={(e) => {
+                            e.currentTarget.src = IMAGEM_PADRAO;
+                          }}
+                        />
+                        <div>
+                          <strong>{produto?.nome || "Produto"}</strong>
+                          <small>{formatBRL(Number(produto?.precoFinal ?? produto?.preco) || 0)}</small>
+                        </div>
+                      </header>
+                      <div className="est-matriz__scroll">
+                        <table className="est-matriz__tabela">
+                          <thead>
+                            <tr>
+                              <th scope="row" className="est-matriz__rotulo">
+                                {produto?.nome || "Produto"}
+                              </th>
+                              {variacoes.map((l) => (
+                                <th key={l.id} scope="col">
+                                  <span className="est-matriz__var">{rotuloVariacao(l, variacoes)}</span>
+                                  <button
+                                    type="button"
+                                    className="est-remover"
+                                    onClick={() => setRemover(l)}
+                                    aria-label={`Desativar ${rotuloLinha(l)}`}
+                                    title="Desativar variação (some da loja)"
+                                  >
+                                    <i className="fas fa-eye-slash" aria-hidden />
+                                  </button>
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <th scope="row" className="est-matriz__rotulo">
+                                Estoque
+                              </th>
+                              {variacoes.map((l) => {
+                                const valorCampo = quantidades[l.id] ?? String(l.quantidade);
+                                const situacao = situacaoLinha(l.quantidade);
+                                return (
+                                  <td key={l.id} className={`is-${situacao}`}>
+                                    <span className="est-qtd">
+                                      <button
+                                        type="button"
+                                        aria-label="Tirar uma"
+                                        disabled={salvando || l.quantidade === 0}
+                                        onClick={() => salvarQuantidade(l, l.quantidade - 1)}
+                                      >
+                                        −
+                                      </button>
+                                      <input
+                                        id={`est-qtd-${l.id}`}
+                                        type="number"
+                                        min={0}
+                                        value={valorCampo}
+                                        onChange={(e) =>
+                                          setQuantidades((q) => ({ ...q, [l.id]: e.target.value }))
+                                        }
+                                        onBlur={(e) => salvarQuantidade(l, e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") e.currentTarget.blur();
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        aria-label="Somar uma"
+                                        disabled={salvando}
+                                        onClick={() => salvarQuantidade(l, l.quantidade + 1)}
+                                      >
+                                        +
+                                      </button>
+                                    </span>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                            <tr>
+                              <th scope="row" className="est-matriz__rotulo">
+                                Vendidos
+                              </th>
+                              {variacoes.map((l) => (
+                                <td key={l.id}>{vendidosPorLinha[l.id] || 0}</td>
+                              ))}
+                            </tr>
+                            <tr>
+                              <th scope="row" className="est-matriz__rotulo">
+                                Situação
+                              </th>
+                              {variacoes.map((l) => {
+                                const situacao = situacaoLinha(l.quantidade);
+                                return (
+                                  <td key={l.id}>
+                                    <span className={`est-chip est-chip--${situacao}`}>
+                                      {rotuloSituacao(situacao)}
+                                    </span>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </article>
+                  ))}
                 </div>
               </div>
             ))}

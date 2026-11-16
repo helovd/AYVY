@@ -1,11 +1,13 @@
 /**
- * Admin › Produtos: lista (GET /produtos), editar e excluir. Formulário em ./Form.jsx.
+ * Admin › Produtos: lista (GET /produtos), ver na loja e excluir.
+ * Cadastro/edição de produto fica com o lojista; o admin só acompanha o catálogo.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { deleteProduto, listProdutos } from "../../../services/adminApi";
 import { notifyAdminMetricsChanged } from "../../../utils/adminMetrics";
 import { resolveImageUrl } from "../../../utils/imageUrl";
+import { normalizeSlugParam } from "../../../utils/lojistaData";
 import "../admin-crud.css";
 
 const STATUS_FILTERS = ["ativo", "rascunho", "esgotado"];
@@ -71,9 +73,15 @@ export default function AdminProdutosList() {
   }
 
   const filteredItems = useMemo(() => {
-    if (!statusFilter) return items;
+    // "Camiseta Teste" ficou em pedidos antigos (FK); some da lista do admin, sem apagar o histórico.
+    const semTeste = items.filter((row) => {
+      const nome = String(row.nome || "").toLowerCase();
+      const slug = String(row.slug || "").toLowerCase();
+      return nome !== "camiseta teste" && !slug.startsWith("camiseta-teste");
+    });
+    if (!statusFilter) return semTeste;
     // Menu Buscar: ativo, rascunho, esgotado (inativo so no form de edicao)
-    return items.filter((row) => row.status === statusFilter);
+    return semTeste.filter((row) => row.status === statusFilter);
   }, [items, statusFilter]);
 
   return (
@@ -84,7 +92,6 @@ export default function AdminProdutosList() {
           <p>Catálogo das lojas na plataforma.</p>
         </div>
         <div className="admin-page-actions">
-          {/* Produtos/Form.jsx — Salvar → POST /produtos */}
           <Link to="/admin/produtos/novo" className="admin-btn admin-btn--primary">
             + Novo produto
           </Link>
@@ -173,13 +180,9 @@ export default function AdminProdutosList() {
                     </td>
                     <td>
                       <div className="admin-crud-actions">
-                        {/* Form — GET /produtos/:id — Salvar → PUT /produtos/:id */}
-                        <Link to={`/admin/produtos/${row.id}/editar`} className="admin-crud-btn-sm">
-                          Editar
-                        </Link>
                         {row.lojista?.slug ? (
                           <Link
-                            to={`/loja/${row.lojista.slug}/p/${row.id}`}
+                            to={`/loja/${normalizeSlugParam(row.lojista.slug)}/p/${row.id}`}
                             className="admin-crud-btn-sm"
                             target="_blank"
                             rel="noreferrer"
